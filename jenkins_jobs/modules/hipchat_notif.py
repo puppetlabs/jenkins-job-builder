@@ -22,6 +22,7 @@ Enable HipChat notifications of build execution.
     reported in HipChat room. For later plugin versions, explicit notify-*
     setting is required (see below).
   * **room** *(str)*: name of HipChat room to post messages to
+  * **room** *(list)*: list of HipChat rooms to post messages to
   * **start-notify** *(bool)*: post messages about build start event
   * **notify-success** *(bool)*: post messages about successful build event
     (Jenkins HipChat plugin >= 0.1.5)
@@ -61,6 +62,7 @@ import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
 import jenkins_jobs.errors
 import logging
+import pkg_resources
 from six.moves import configparser
 import sys
 
@@ -94,6 +96,7 @@ class HipChat(jenkins_jobs.modules.base.Base):
                              " containing authtoken:\n{0}".format(e))
                 sys.exit(1)
             self.jenkinsUrl = self.registry.global_config.get('jenkins', 'url')
+            self.sendAs = self.registry.global_config.get('jenkins', 'send-as')
 
     def gen_xml(self, parser, xml_parent, data):
         hipchat = data.get('hipchat')
@@ -110,7 +113,13 @@ class HipChat(jenkins_jobs.modules.base.Base):
         pdefhip = XML.SubElement(properties,
                                  'jenkins.plugins.hipchat.'
                                  'HipChatNotifier_-HipChatJobProperty')
-        XML.SubElement(pdefhip, 'room').text = hipchat['room']
+
+        room = XML.SubElement(pdefhip, 'room')
+        if isinstance(hipchat['room'], list):
+            room.text = ",".join(hipchat['room'])
+        else:
+            room.text = hipchat['room']
+
         XML.SubElement(pdefhip, 'startNotification').text = str(
             hipchat.get('start-notify', False)).lower()
         if hipchat.get('notify-success'):
@@ -137,7 +146,16 @@ class HipChat(jenkins_jobs.modules.base.Base):
             publishers = XML.SubElement(xml_parent, 'publishers')
         hippub = XML.SubElement(publishers,
                                 'jenkins.plugins.hipchat.HipChatNotifier')
-        XML.SubElement(hippub, 'jenkinsUrl').text = self.jenkinsUrl
+
+        plugin_info = self.registry.get_plugin_info("Jenkins HipChat Plugin")
+        version = pkg_resources.parse_version(plugin_info.get('version', '0'))
+
+        if version >= pkg_resources.parse_version("0.1.8"):
+            XML.SubElement(hippub, 'buildServerUrl').text = self.jenkinsUrl
+            XML.SubElement(hippub, 'sendAs').text = self.sendAs
+        else:
+            XML.SubElement(hippub, 'jenkinsUrl').text = self.jenkinsUrl
+
         XML.SubElement(hippub, 'authToken').text = self.authToken
         # The room specified here is the default room.  The default is
         # redundant in this case since a room must be specified.  Leave empty.
