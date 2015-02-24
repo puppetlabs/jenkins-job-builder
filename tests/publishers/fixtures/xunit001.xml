@@ -7,12 +7,14 @@
           <pattern>junit.log</pattern>
           <failIfNotNew>true</failIfNotNew>
           <deleteOutputFiles>true</deleteOutputFiles>
+          <skipNoTestFiles>false</skipNoTestFiles>
           <stopProcessingIfError>true</stopProcessingIfError>
         </PHPUnitJunitHudsonTestType>
         <CppUnitJunitHudsonTestType>
           <pattern>cppunit.log</pattern>
           <failIfNotNew>true</failIfNotNew>
           <deleteOutputFiles>true</deleteOutputFiles>
+          <skipNoTestFiles>false</skipNoTestFiles>
           <stopProcessingIfError>true</stopProcessingIfError>
         </CppUnitJunitHudsonTestType>
       </types>
@@ -31,6 +33,9 @@
         </org.jenkinsci.plugins.xunit.threshold.SkippedThreshold>
       </thresholds>
       <thresholdMode>2</thresholdMode>
+      <extraConfiguration>
+        <testTimeMargin>3000</testTimeMargin>
+      </extraConfiguration>
     </xunit>
   </publishers>
 </project>

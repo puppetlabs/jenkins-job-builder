@@ -174,8 +174,8 @@ class YamlParser(object):
                                                .format(n))
                 name = dfn['name']
                 if name in group:
-                    self._handle_dups("Duplicate entry found: '{0}' is "
-                                      "already defined".format(name))
+                    self._handle_dups("Duplicate entry found in '{0}: '{1}' "
+                                      "already defined".format(fp.name, name))
                 group[name] = dfn
                 self.data[cls] = group
 
@@ -596,7 +596,7 @@ class CacheStorage(object):
         if flush or not os.path.isfile(self.cachefilename):
             self.data = {}
         else:
-            with file(self.cachefilename, 'r') as yfile:
+            with open(self.cachefilename, 'r') as yfile:
                 self.data = yaml.load(yfile)
         logger.debug("Using cache: '{0}'".format(self.cachefilename))
 
@@ -710,11 +710,13 @@ class Builder(object):
         self.cache = CacheStorage(jenkins_url, flush=flush_cache)
         self.global_config = config
         self.ignore_cache = ignore_cache
+        self._plugins_list = plugins_list
 
-        if plugins_list is None:
-            self.plugins_list = self.jenkins.get_plugins_info()
-        else:
-            self.plugins_list = plugins_list
+    @property
+    def plugins_list(self):
+        if self._plugins_list is None:
+            self._plugins_list = self.jenkins.get_plugins_info()
+        return self._plugins_list
 
     def load_files(self, fn):
         self.parser = YamlParser(self.global_config, self.plugins_list)

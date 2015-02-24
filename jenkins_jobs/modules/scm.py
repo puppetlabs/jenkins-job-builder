@@ -44,7 +44,9 @@ def git(parser, xml_parent, data):
     <https://wiki.jenkins-ci.org/display/JENKINS/Git+Plugin>`_
 
     :arg str url: URL of the git repository
-    :arg str credentials-id: ID of credentials to use to connect (optional)
+    :arg str credentials-id: ID of credential to use to connect, which is the
+      last field(a 32-digit hexadecimal code) of the path of URL visible after
+      you clicked the credential under Jenkins Global credentials. (optional)
     :arg str refspec: refspec to fetch (default '+refs/heads/\*:refs/remotes/\
 remoteName/\*')
     :arg str name: name to fetch (default 'origin')
@@ -53,8 +55,10 @@ remoteName/\*')
 
         :Remote: * **url** (`string`) - url of remote repo
                  * **refspec** (`string`) - refspec to fetch (optional)
-                 * **credentials-id** - ID of credentials to use to connect
-                     (optional)
+                 * **credentials-id** - ID of credential to use to connect,
+                     which is the last field of the path of URL
+                     (a 32-digit hexadecimal code) visible after you clicked
+                     credential under Jenkins Global credentials. (optional)
     :arg list(str) branches: list of branch specifiers to build (default '**')
     :arg list(str) excluded-users: list of users to ignore revisions from
       when polling for changes. (if polling is enabled, optional)
@@ -112,7 +116,7 @@ remoteName/\*')
                 * **remote** (`string`) - name of repo that contains branch to
                     create changelog against (default 'origin')
                 * **branch** (`string`) - name of the branch to create
-                    create changelog against (default 'master')
+                    changelog against (default 'master')
 
         :arg dict clean:
             :clean:
@@ -249,19 +253,17 @@ remoteName/\*')
     for elem in mapping:
         (optname, xmlname, val) = elem[:3]
 
-        # Throw warning for deprecated settings and skip
+        # Throw warning for deprecated settings and skip if the 'submodule' key
+        # is available.
         submodule_cfgs = ['disable-submodules', 'recursive-submodules']
         if optname in submodule_cfgs:
-            if 'submodule' in data:
-                logger.warn("'{0}' is deprecated and will be ignored in "
-                            "favour of 'submodule'".format(optname))
-                continue
-
             if optname in data:
                 logger.warn("'{0}' is deprecated, please convert to use the "
                             "'submodule' section instead as support for this "
                             "top level option will be removed in a future "
                             "release.".format(optname))
+            if 'submodule' in data:
+                continue
 
         attrs = {}
         if len(elem) >= 4:

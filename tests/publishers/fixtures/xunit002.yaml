@@ -1,5 +1,6 @@
 publishers:
   - xunit:
+      test-time-margin: 5000
       thresholdmode: 'number'
       thresholds:
           - failed:
@@ -15,3 +16,4 @@ publishers:
       types:
           - ctest:
               pattern: "build/tests/reports/ctest.xml"
+              skip-if-no-test-files: true

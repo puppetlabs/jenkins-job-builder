@@ -5,6 +5,7 @@
       <spec>* * * * *</spec>
       <adminlist>user1
         user2</adminlist>
+      <allowMembersOfWhitelistedOrgsAsAdmin>true</allowMembersOfWhitelistedOrgsAsAdmin>
       <whitelist>user3
         user4</whitelist>
       <orgslist>org1
@@ -15,6 +16,14 @@
       <useGitHubHooks>true</useGitHubHooks>
       <permitAll>false</permitAll>
       <autoCloseFailedPullRequests>false</autoCloseFailedPullRequests>
+      <whiteListTargetBranches>
+        <org.jenkinsci.plugins.ghprb.GhprbBranch>
+          <branch>master</branch>
+        </org.jenkinsci.plugins.ghprb.GhprbBranch>
+        <org.jenkinsci.plugins.ghprb.GhprbBranch>
+          <branch>testing</branch>
+        </org.jenkinsci.plugins.ghprb.GhprbBranch>
+      </whiteListTargetBranches>
     </org.jenkinsci.plugins.ghprb.GhprbTrigger>
   </triggers>
 </project>

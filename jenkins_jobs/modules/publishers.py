@@ -858,6 +858,10 @@ def xunit(parser, xml_parent, data):
     'unstable', 'unstablenew', 'failure', 'failurenew'. Omitting a \
     value will resort on xUnit default value (should be 0).
 
+    :arg int test-time-margin: Give the report time margin value (default to \
+    3000) in ms, before to fail if not new (unless the option 'Fail the build \
+    if test results were not updated this run' is checked).
+
     :arg dict types: per framework configuration. The key should be \
     one of the internal types we support:\
     'aunit', 'boosttest', 'checktype', 'cpptest', 'cppunit', 'ctest', \
@@ -875,6 +879,9 @@ def xunit(parser, xml_parent, data):
     results have not been found (default: true).
 
     :arg bool deleteoutput: delete temporary JUnit files (default: true)
+
+    :arg bool skip-if-no-test-files: Skip parsing this xUnit type report if \
+    there are no test reports files (default: false).
 
     :arg bool stoponerror: Fail the build whenever an error occur during \
     a result file processing (default: true).
@@ -937,6 +944,9 @@ def xunit(parser, xml_parent, data):
         XML.SubElement(xmlframework, 'deleteOutputFiles').text = \
             str(supported_type[framework_name].get(
                 'deleteoutput', True)).lower()
+        XML.SubElement(xmlframework, 'skipNoTestFiles').text = \
+            str(supported_type[framework_name].get(
+                'skip-if-no-test-files', False)).lower()
         XML.SubElement(xmlframework, 'stopProcessingIfError').text = \
             str(supported_type[framework_name].get(
                 'stoponerror', True)).lower()
@@ -967,6 +977,10 @@ def xunit(parser, xml_parent, data):
         thresholdmode = '2'
     XML.SubElement(xunit, 'thresholdMode').text = \
         thresholdmode
+
+    extra_config = XML.SubElement(xunit, 'extraConfiguration')
+    XML.SubElement(extra_config, 'testTimeMargin').text = \
+        str(data.get('test-time-margin', '3000'))
 
 
 def _violations_add_entry(xml_parent, name, data):
@@ -3930,6 +3944,109 @@ def scan_build(parser, xml_parent, data):
     XML.SubElement(p, 'markBuildUnstableWhenThresholdIsExceeded').text = \
         str(data.get('mark-unstable', False)).lower()
     XML.SubElement(p, 'bugThreshold').text = threshold
+
+
+def dry(parser, xml_parent, data):
+    """yaml: dry
+    Publish trend reports with DRY.
+    Requires the Jenkins `DRY Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/DRY+Plugin>`_
+
+    The DRY component accepts a dictionary with the following values:
+
+    :arg str pattern: Report filename pattern (optional)
+    :arg bool can-run-on-failed: Also runs for failed builds, instead of just
+      stable or unstable builds (default false)
+    :arg bool should-detect-modules: Determines if Ant or Maven modules should
+      be detected for all files that contain warnings (default false)
+    :arg int healthy: Sunny threshold (optional)
+    :arg int unhealthy: Stormy threshold (optional)
+    :arg str health-threshold: Threshold priority for health status
+      ('low', 'normal' or 'high', defaulted to 'low')
+    :arg int high-threshold: Minimum number of duplicated lines for high
+      priority warnings. (default 50)
+    :arg int normal-threshold: Minimum number of duplicated lines for normal
+      priority warnings. (default 25)
+    :arg dict thresholds: Mark build as failed or unstable if the number of
+      errors exceeds a threshold. (optional)
+
+        :thresholds:
+            * **unstable** (`dict`)
+                :unstable: * **total-all** (`int`)
+                           * **total-high** (`int`)
+                           * **total-normal** (`int`)
+                           * **total-low** (`int`)
+                           * **new-all** (`int`)
+                           * **new-high** (`int`)
+                           * **new-normal** (`int`)
+                           * **new-low** (`int`)
+
+            * **failed** (`dict`)
+                :failed: * **total-all** (`int`)
+                         * **total-high** (`int`)
+                         * **total-normal** (`int`)
+                         * **total-low** (`int`)
+                         * **new-all** (`int`)
+                         * **new-high** (`int`)
+                         * **new-normal** (`int`)
+                         * **new-low** (`int`)
+    :arg str default-encoding: Encoding for parsing or showing files (optional)
+    :arg bool do-not-resolve-relative-paths: (default false)
+    :arg bool dont-compute-new: If set to false, computes new warnings based on
+      the reference build (default true)
+    :arg bool use-stable-build-as-reference: The number of new warnings will be
+      calculated based on the last stable build, allowing reverts of unstable
+      builds where the number of warnings was decreased. (default false)
+    :arg bool use-delta-values: If set then the number of new warnings is
+      calculated by subtracting the total number of warnings of the current
+      build from the reference build.
+      (default false)
+
+    Example:
+
+    .. literalinclude::  /../../tests/publishers/fixtures/dry001.yaml
+
+    Full example:
+
+    .. literalinclude::  /../../tests/publishers/fixtures/dry004.yaml
+
+    """
+
+    xml_element = XML.SubElement(xml_parent, 'hudson.plugins.dry.DryPublisher')
+
+    build_trends_publisher('[DRY] ', xml_element, data)
+
+    # Add specific settings for this trends publisher
+    settings = [
+        ('high-threshold', 'highThreshold', 50),
+        ('normal-threshold', 'normalThreshold', 25)]
+
+    for key, tag_name, default in settings:
+        xml_config = XML.SubElement(xml_element, tag_name)
+        config_value = data.get(key, default)
+
+        xml_config.text = str(config_value)
+
+
+def shining_panda(parser, xml_parent, data):
+    """yaml: shining-panda
+    Publish coverage.py results. Requires the Jenkins `ShiningPanda Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/ShiningPanda+Plugin>`_.
+
+    :arg str html-reports-directory: path to coverage.py html results
+                                    (optional)
+
+    Example:
+
+    .. literalinclude::  /../../tests/publishers/fixtures/shiningpanda001.yaml
+       :language: yaml
+    """
+    shining_panda_plugin = XML.SubElement(
+        xml_parent,
+        'jenkins.plugins.shiningpanda.publishers.CoveragePublisher')
+    if 'html-reports-directory' in data:
+        XML.SubElement(shining_panda_plugin, 'htmlDir').text = str(
+            data['html-reports-directory'])
 
 
 def create_publishers(parser, action):
