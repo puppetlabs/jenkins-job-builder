@@ -30,6 +30,7 @@ import time
 from jenkins_jobs.constants import MAGIC_MANAGE_STRING
 from jenkins_jobs.parallel import parallelize
 from jenkins_jobs.parser import YamlParser
+from jenkins_jobs.xml_config import XmlBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -296,14 +297,29 @@ class Builder(object):
                     n_workers=None):
         orig = time.time()
         self.load_files(input_fn)
-        self.parser.expandYaml(jobs_glob)
-        self.parser.generateXML()
+        jobs = self.parser.expandYaml(jobs_glob)
+
+        self.__update_jobs(jobs, self.parser.registry, orig,
+                           original_data=self.parser.data)
+
+    def deploy_jobs(self, *args, **kwargs):
+        """
+        This method takes a list of XmlJobs and then deploys those jobs to the
+        Jenkins configured for this instance of Builder, without invoking the
+        YamlParser.
+        """
+        self.__update_jobs(*args, **kwargs)
+
+    def __update_jobs(self, jobs, registry, start_time, output=None,
+                      n_workers=None, original_data=None):
+        xml_builder = XmlBuilder(registry, data=original_data)
+        xml_jobs = xml_builder.generateXML(jobs)
         step = time.time()
         logging.debug('%d XML files generated in %ss',
-                      len(self.parser.jobs), str(step - orig))
+                      len(jobs), str(step - start_time))
 
-        logger.info("Number of jobs generated:  %d", len(self.parser.xml_jobs))
-        self.parser.xml_jobs.sort(key=operator.attrgetter('name'))
+        logger.info("Number of jobs generated:  %d", len(xml_jobs))
+        xml_jobs.sort(key=operator.attrgetter('name'))
 
         if (output and not hasattr(output, 'write')
                 and not os.path.isdir(output)):
@@ -315,7 +331,7 @@ class Builder(object):
                     raise
 
         if output:
-            for job in self.parser.xml_jobs:
+            for job in xml_jobs:
                 if hasattr(output, 'write'):
                     # `output` is a file-like object
                     logger.info("Job name:  %s", job.name)
@@ -336,13 +352,13 @@ class Builder(object):
                 f = open(output_fn, 'w')
                 f.write(job.output())
                 f.close()
-            return len(self.parser.xml_jobs)
+            return xml_jobs, len(xml_jobs)
 
         # Filter out the jobs that did not change
         logging.debug('Filtering %d jobs for changed jobs',
-                      len(self.parser.xml_jobs))
+                      len(xml_jobs))
         step = time.time()
-        jobs = [job for job in self.parser.xml_jobs
+        jobs = [job for job in xml_jobs
                 if self.changed(job)]
         logging.debug("Filtered for changed jobs in %ss",
                       (time.time() - step))
@@ -374,8 +390,8 @@ class Builder(object):
         logging.debug("Updated %d jobs in %ss",
                       len(jobs),
                       time.time() - step)
-        logging.debug("Total run took %ss", (time.time() - orig))
-        return len(jobs)
+        logging.debug("Total run took %ss", (time.time() - start_time))
+        return jobs, len(jobs)
 
     @parallelize
     def parallel_update_job(self, job):
