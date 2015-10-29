@@ -5,6 +5,7 @@
       <configVersion>2</configVersion>
       <pushMerge>true</pushMerge>
       <pushOnlyIfSuccess>false</pushOnlyIfSuccess>
+      <forcePush>false</forcePush>
       <tagsToPush>
         <hudson.plugins.git.GitPublisher_-TagToPush>
           <targetRepoName>tagremotename</targetRepoName>
@@ -17,7 +18,7 @@
       <branchesToPush>
         <hudson.plugins.git.GitPublisher_-BranchToPush>
           <targetRepoName>branchremotename</targetRepoName>
-	  <branchName>some/branch</branchName>
+          <branchName>some/branch</branchName>
         </hudson.plugins.git.GitPublisher_-BranchToPush>
       </branchesToPush>
       <notesToPush>

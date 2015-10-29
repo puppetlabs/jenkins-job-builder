@@ -19,6 +19,9 @@
           </series>
           <group>bench</group>
           <useDescr>false</useDescr>
+          <exclZero>false</exclZero>
+          <logarithmic>false</logarithmic>
+          <keepRecords>true</keepRecords>
           <numBuilds/>
           <style>line</style>
         </hudson.plugins.plot.Plot>

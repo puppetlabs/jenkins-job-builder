@@ -17,10 +17,11 @@ import os
 import testtools
 
 import jenkins_jobs
+from tests.base import LoggingFixture
 from tests.base import mock
 
 
-class TestCaseCacheStorage(testtools.TestCase):
+class TestCaseCacheStorage(LoggingFixture, testtools.TestCase):
 
     @mock.patch('jenkins_jobs.builder.CacheStorage.get_cache_dir',
                 lambda x: '/bad/file')
@@ -32,7 +33,7 @@ class TestCaseCacheStorage(testtools.TestCase):
         with mock.patch('jenkins_jobs.builder.CacheStorage.save') as save_mock:
             with mock.patch('os.path.isfile', return_value=False):
                 jenkins_jobs.builder.CacheStorage("dummy")
-            save_mock.assert_called_once_with()
+            save_mock.assert_called_with()
 
     @mock.patch('jenkins_jobs.builder.CacheStorage.get_cache_dir',
                 lambda x: '/bad/file')

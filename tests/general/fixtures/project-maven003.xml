@@ -5,6 +5,8 @@
   <rootPOM>pom.xml</rootPOM>
   <aggregatorStyleBuild>true</aggregatorStyleBuild>
   <incrementalBuild>false</incrementalBuild>
+  <siteArchivingDisabled>false</siteArchivingDisabled>
+  <fingerprintingDisabled>false</fingerprintingDisabled>
   <perModuleEmail>true</perModuleEmail>
   <archivingDisabled>false</archivingDisabled>
   <resolveDependencies>false</resolveDependencies>
@@ -18,9 +20,9 @@
     <settingsConfigId>org.jenkinsci.plugins.configfiles.maven.GlobalMavenSettingsConfig0123456789012</settingsConfigId>
   </globalSettings>
   <runPostStepsIfResult>
-    <name>FAILURE</name>
-    <ordinal>2</ordinal>
-    <color>red</color>
+    <name>SUCCESS</name>
+    <ordinal>0</ordinal>
+    <color>BLUE</color>
   </runPostStepsIfResult>
   <actions/>
   <keepDependencies>false</keepDependencies>

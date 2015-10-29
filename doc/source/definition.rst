@@ -2,10 +2,10 @@ Job Definitions
 ===============
 
 The job definitions for Jenkins Job Builder are kept in any number of
-YAML files, in whatever way you would like to organize them.  When you
+YAML or JSON files, in whatever way you would like to organize them.  When you
 invoke ``jenkins-jobs`` you may specify either the path of a single
 YAML file, or a directory.  If you choose a directory, all of
-the .yaml (or .yml) files in that directory will be read, and all the
+the .yaml/.yml or .json files in that directory will be read, and all the
 jobs they define will be created or updated.
 
 Definitions
@@ -210,9 +210,52 @@ Then ``<builders />`` section of the generated job show up as::
   </builders>
 
 As you can see, the specialized macro ``addtwo`` reused the definition from
-the generic macro ``add``.  Whenever you forget a parameter from a macro,
-it will not be expanded and left as is, which will most probably cause havoc in
-your Jenkins builds.
+the generic macro ``add``.
+
+Macro Notes
+~~~~~~~~~~~
+
+If a macro is not passed any parameters it will not have any expansion
+performed on it.  Thus if you forget to provide `any` parameters to a
+macro that expects some, the parameter-templates (``{foo}``) will be
+left as is in the resulting output; this is almost certainly not what
+you want.  Note if you provide an invalid parameter, the expansion
+will fail; the expansion will only be skipped if you provide `no`
+parameters at all.
+
+Macros are expanded using Python string substitution rules.  This can
+especially cause confusion with shell snippets that use ``{`` as part
+of their syntax.  As described, if a macro has `no` parameters, no
+expansion will be performed and thus it is correct to write the script
+with no escaping, e.g.::
+
+  - builder:
+    name: a_builder
+    builders:
+      - shell: |
+          VARIABLE=${VARIABLE:-bar}
+          function foo {
+              echo "my shell function"
+          }
+
+However, if the macro `has` parameters, you must escape the ``{`` you
+wish to make it through to the output, e.g.::
+
+  - builder:
+    name: a_builder
+    builders:
+       - shell: |
+         PARAMETER={parameter}
+         VARIABLE=${{VARIABLE:-bar}}
+         function foo {{
+              echo "my shell function"
+         }}
+
+Note that a ``job-template`` will have parameters by definition (at
+least a ``name``).  Thus embedded-shell within a ``job-template`` should
+always use ``{{`` to achieve a literal ``{``.  A generic builder will need
+to consider the correct quoting based on its use of parameters.
+
 
 .. _raw:
 
@@ -222,7 +265,7 @@ Raw config
 It is possible, but not recommended, to use `raw` within a module to
 inject raw xml into the job configs.
 
-This is relevant in case there is no apropriate module for a
+This is relevant in case there is no appropriate module for a
 Jenkins plugin or the module does not behave as you expect it to do.
 
 For example:
@@ -231,7 +274,7 @@ For example:
 
 Is the raw way of adding support for the `xvnc` wrapper.
 
-To get the apropriate xml to use you would need to create/edit a job
+To get the appropriate xml to use you would need to create/edit a job
 in Jenkins and grab the relevant raw xml segment from the
 `config.xml`.
 
@@ -296,10 +339,10 @@ For example:
 
 
 By default JJB will fail if it tries to interpolate a variable that was not
-defined, but you can change that behaviour and allow empty variables with the
+defined, but you can change that behavior and allow empty variables with the
 allow_empty_variables configuration option.
 
-For example, having a configuration file with tha toption enabled:
+For example, having a configuration file with that option enabled:
 
 .. literalinclude:: /../../tests/yamlparser/fixtures/allow_empty_variables.conf
 
@@ -351,6 +394,7 @@ The bulk of the job definitions come from the following modules.
 .. toctree::
    :maxdepth: 2
 
+   project_externaljob
    project_flow
    project_freestyle
    project_maven

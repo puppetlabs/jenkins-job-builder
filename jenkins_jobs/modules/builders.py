@@ -40,8 +40,13 @@ Example::
 import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
 from jenkins_jobs.modules import hudson_model
+from jenkins_jobs.modules.helpers import cloudformation_init
+from jenkins_jobs.modules.helpers import cloudformation_region_dict
+from jenkins_jobs.modules.helpers import cloudformation_stack
 from jenkins_jobs.modules.helpers import config_file_provider_builder
 from jenkins_jobs.modules.helpers import config_file_provider_settings
+from jenkins_jobs.modules.helpers import copyartifact_build_selector
+from jenkins_jobs.modules.helpers import convert_mapping_to_xml
 from jenkins_jobs.errors import (JenkinsJobsException,
                                  MissingAttributeError,
                                  InvalidAttributeError)
@@ -98,10 +103,30 @@ def copyartifact(parser, xml_parent, data):
         (default: false)
     :arg str which-build: which build to get artifacts from
         (optional, default last-successful)
+
+        :which-build values:
+            * **last-successful**
+            * **last-completed**
+            * **specific-build**
+            * **last-saved**
+            * **upstream-build**
+            * **permalink**
+            * **workspace-latest**
+            * **build-param**
+
     :arg str build-number: specifies the build number to get when
         when specific-build is specified as which-build
     :arg str permalink: specifies the permalink to get when
         permalink is specified as which-build
+
+        :permalink values:
+            * **last**
+            * **last-stable**
+            * **last-successful**
+            * **last-failed**
+            * **last-unstable**
+            * **last-unsuccessful**
+
     :arg bool stable: specifies to get only last stable build when
         last-successful is specified as which-build
     :arg bool fallback-to-last-successful: specifies to fallback to
@@ -110,22 +135,6 @@ def copyartifact(parser, xml_parent, data):
         build-param is specified as which-build
     :arg string parameter-filters: Filter matching jobs based on these
         parameters (optional)
-    :which-build values:
-      * **last-successful**
-      * **last-completed**
-      * **specific-build**
-      * **last-saved**
-      * **upstream-build**
-      * **permalink**
-      * **workspace-latest**
-      * **build-param**
-    :permalink values:
-      * **last**
-      * **last-stable**
-      * **last-successful**
-      * **last-failed**
-      * **last-unstable**
-      * **last-unsuccessful**
 
 
     Example:
@@ -137,7 +146,10 @@ def copyartifact(parser, xml_parent, data):
     # Warning: this only works with copy artifact version 1.26+,
     # for copy artifact version 1.25- the 'projectName' element needs
     # to be used instead of 'project'
-    XML.SubElement(t, 'project').text = data["project"]
+    try:
+        XML.SubElement(t, 'project').text = data["project"]
+    except KeyError:
+        raise MissingAttributeError('project')
     XML.SubElement(t, 'filter').text = data.get("filter", "")
     XML.SubElement(t, 'target').text = data.get("target", "")
     flatten = data.get("flatten", False)
@@ -145,45 +157,7 @@ def copyartifact(parser, xml_parent, data):
     optional = data.get('optional', False)
     XML.SubElement(t, 'optional').text = str(optional).lower()
     XML.SubElement(t, 'parameters').text = data.get("parameter-filters", "")
-    select = data.get('which-build', 'last-successful')
-    selectdict = {'last-successful': 'StatusBuildSelector',
-                  'last-completed': 'LastCompletedBuildSelector',
-                  'specific-build': 'SpecificBuildSelector',
-                  'last-saved': 'SavedBuildSelector',
-                  'upstream-build': 'TriggeredBuildSelector',
-                  'permalink': 'PermalinkBuildSelector',
-                  'workspace-latest': 'WorkspaceSelector',
-                  'build-param': 'ParameterizedBuildSelector'}
-    if select not in selectdict:
-        raise InvalidAttributeError('which-build',
-                                    select,
-                                    selectdict.keys())
-    permalink = data.get('permalink', 'last')
-    permalinkdict = {'last': 'lastBuild',
-                     'last-stable': 'lastStableBuild',
-                     'last-successful': 'lastSuccessfulBuild',
-                     'last-failed': 'lastFailedBuild',
-                     'last-unstable': 'lastUnstableBuild',
-                     'last-unsuccessful': 'lastUnsuccessfulBuild'}
-    if permalink not in permalinkdict:
-        raise InvalidAttributeError('permalink',
-                                    permalink,
-                                    permalinkdict.keys())
-    selector = XML.SubElement(t, 'selector',
-                              {'class': 'hudson.plugins.copyartifact.' +
-                               selectdict[select]})
-    if select == 'specific-build':
-        XML.SubElement(selector, 'buildNumber').text = data['build-number']
-    if select == 'last-successful':
-        XML.SubElement(selector, 'stable').text = str(
-            data.get('stable', False)).lower()
-    if select == 'upstream-build':
-        XML.SubElement(selector, 'fallbackToLastSuccessful').text = str(
-            data.get('fallback-to-last-successful', False)).lower()
-    if select == 'permalink':
-        XML.SubElement(selector, 'id').text = permalinkdict[permalink]
-    if select == 'build-param':
-        XML.SubElement(selector, 'parameterName').text = data['param']
+    copyartifact_build_selector(t, data)
 
 
 def change_assembly_version(parser, xml_parent, data):
@@ -289,8 +263,9 @@ def trigger_remote(parser, xml_parent, data):
     must add remote jenkins servers whose 'Display Name' field are what make up
     valid fields on the `remote-jenkins-name` attribute below.
 
-    :arg str remote-jenkins-name: the remote Jenkins server
+    :arg str remote-jenkins-name: the remote Jenkins server (required)
     :arg str job: the Jenkins project to trigger on the remote Jenkins server
+      (required)
     :arg bool should-not-fail-build:
       if true, remote job failure will not lead current job to fail
       (default false)
@@ -306,9 +281,6 @@ def trigger_remote(parser, xml_parent, data):
     :arg str connection-retry-limit: number of connection attempts to remote
       Jenkins server before giving up.
       (default 5)
-    :arg str api-token: if the remote job has defined an api token, set its
-      value here
-      (optional)
     :arg str predefined-parameters: predefined parameters to send to the remote
       job when triggering it
       (optional)
@@ -340,10 +312,8 @@ def trigger_remote(parser, xml_parent, data):
 
     XML.SubElement(triggerr, 'job').text = data.get('job')
 
-    if data.get('should-fail-build', True):
-        XML.SubElement(triggerr, 'shouldNotFailBuild').text = 'false'
-    else:
-        XML.SubElement(triggerr, 'shouldNotFailBuild').text = 'true'
+    XML.SubElement(triggerr, 'shouldNotFailBuild').text = str(
+        data.get('should-not-fail-build', False)).lower()
 
     XML.SubElement(triggerr,
                    'pollInterval').text = str(data.get('poll-interval', 10))
@@ -1030,83 +1000,262 @@ def conditional_step(parser, xml_parent, data):
     boolean-expression Run the step if the expression expends to a
                        representation of true
 
-                         :condition-expression: Expression to expand
+                         :condition-expression: Expression to expand (required)
+    build-cause        Run if the current build has a specific cause
+
+                         :cause: The cause why the build was triggered.
+                           Following causes are supported -
+
+                           :USER_CAUSE: build was triggered by a manual
+                             interaction. (default)
+                           :SCM_CAUSE: build was triggered by a SCM change.
+                           :TIMER_CAUSE: build was triggered by a timer.
+                           :CLI_CAUSE: build was triggered by via CLI interface
+                           :REMOTE_CAUSE: build was triggered via remote
+                             interface.
+                           :UPSTREAM_CAUSE: build was triggered by an upstream
+                             project.
+
+                           Following supported if XTrigger plugin installed:
+
+                           :FS_CAUSE: build was triggered by a file system
+                             change (FSTrigger Plugin).
+                           :URL_CAUSE: build was triggered by a URL change
+                             (URLTrigger Plugin)
+                           :IVY_CAUSE: build triggered by an Ivy dependency
+                             version has change (IvyTrigger Plugin)
+                           :SCRIPT_CAUSE: build was triggered by a script
+                             (ScriptTrigger Plugin)
+                           :BUILDRESULT_CAUSE: build was triggered by a
+                             result of an other job (BuildResultTrigger Plugin)
+                         :exclusive-cause: (bool) There might by multiple
+                           casues causing a build to be triggered, with
+                           this true, the cause must be the only one
+                           causing this build this build to be triggered.
+                           (default False)
+    day-of-week        Only run on specific days of the week.
+
+                         :day-selector: Days you want the build to run on.
+                           Following values are supported -
+
+                           :weekend: Saturday and Sunday (default).
+                           :weekday: Monday - Friday.
+                           :select-days: Selected days, defined by 'days'
+                             below.
+                           :days: True for days for which the build should
+                             run. Definition needed only for 'select-days'
+                             day-selector, at the same level as day-selector.
+                             Define the days to run under this.
+
+                             :SUN: Run on Sunday (default False)
+                             :MON: Run on Monday (default False)
+                             :TUES: Run on Tuesday (default False)
+                             :WED: Run on Wednesday (default False)
+                             :THURS: Run on Thursday (default False)
+                             :FRI: Run on Friday (default False)
+                             :SAT: Run on Saturday (default False)
+                         :use-build-time: (bool) Use the build time instead of
+                           the the time that the condition is evaluated.
+                           (default False)
+    execution-node     Run only on selected nodes.
+
+                         :nodes: (list) List of nodes to execute on. (required)
     strings-match      Run the step if two strings match
 
-                         :condition-string1: First string
-                         :condition-string2: Second string
+                         :condition-string1: First string (optional)
+                         :condition-string2: Second string (optional)
                          :condition-case-insensitive: Case insensitive
-                           defaults to false
+                           (default False)
     current-status     Run the build step if the current build status is
                        within the configured range
 
                          :condition-worst: Accepted values are SUCCESS,
                            UNSTABLE, FAILURE, NOT_BUILD, ABORTED
+                           (default SUCCESS)
                          :condition-best: Accepted values are SUCCESS,
                            UNSTABLE, FAILURE, NOT_BUILD, ABORTED
+                           (default SUCCESS)
 
     shell              Run the step if the shell command succeed
 
                          :condition-command: Shell command to execute
+                           (optional)
     windows-shell      Similar to shell, except that commands will be
                        executed by cmd, under Windows
 
-                         :condition-command: Command to execute
+                         :condition-command: Command to execute (optional)
     file-exists        Run the step if a file exists
 
                          :condition-filename: Check existence of this file
+                           (required)
                          :condition-basedir: If condition-filename is
                            relative, it will be considered relative to
                            either `workspace`, `artifact-directory`,
-                           or `jenkins-home`. Default is `workspace`.
+                           or `jenkins-home`. (default 'workspace')
+    files-match        Run if one or more files match the selectors.
+
+                         :include-pattern: (list str) List of Includes
+                           Patterns. Since the separator in the patterns is
+                           hardcoded as ',', any use of ',' would need
+                           escaping. (optional)
+                         :exclude-pattern: (list str) List of Excludes
+                           Patterns. Since the separator in the patterns is
+                           hardcoded as ',', any use of ',' would need
+                           escaping. (optional)
+                         :condition-basedir: Accepted values are `workspace`,
+                           `artifact-directory`, or `jenkins-home`.
+                           (default 'workspace')
+    num-comp           Run if the numerical comparison is true.
+
+                         :lhs: Left Hand Side. Must evaluate to a number.
+                           (required)
+                         :rhs: Right Hand Side. Must evaluate to a number.
+                           (required)
+                         :comparator: Accepted values are `less-than`,
+                           `greater-than`, `equal`, `not-equal`,
+                           `less-than-equal`, `greater-than-equal`.
+                           (default 'less-than')
+    regex-match        Run if the Expression matches the Label.
+
+                         :regex: The regular expression used to match the label
+                           (optional)
+                         :label: The label that will be tested by the regular
+                           expression. (optional)
+    time               Only run during a certain period of the day.
+
+                         :earliest-hour: Starting hour (default "09")
+                         :earliest-min: Starting min (default "00")
+                         :latest-hour: Ending hour (default "17")
+                         :latest-min: Ending min (default "30")
+                         :use-build-time: (bool) Use the build time instead of
+                           the the time that the condition is evaluated.
+                           (default False)
     not                Run the step if the inverse of the condition-operand
                        is true
 
                          :condition-operand: Condition to evaluate.  Can be
-                           any supported conditional-step condition.
+                           any supported conditional-step condition. (required)
+    and                Run the step if logical and of all conditional-operands
+                       is true
+
+                         :condition-operands: (list) Conditions to evaluate.
+                           Can be any supported conditional-step condition.
+                           (required)
+    or                 Run the step if logical or of all conditional-operands
+                       is true
+
+                         :condition-operands: (list) Conditions to evaluate.
+                           Can be any supported conditional-step condition.
+                           (required)
     ================== ====================================================
 
     Example:
 
-    .. literalinclude:: \
-    /../../tests/builders/fixtures/conditional-step-success-failure.yaml
-       :language: yaml
-    .. literalinclude:: \
-    /../../tests/builders/fixtures/conditional-step-not-file-exists.yaml
-       :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-success-failure.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-not-file-exists.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-day-of-week001.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-day-of-week003.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-time.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-regex-match.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-or.yaml
+        :language: yaml
+    .. literalinclude::
+        /../../tests/builders/fixtures/conditional-step-and.yaml
+        :language: yaml
     """
     def build_condition(cdata, cond_root_tag):
         kind = cdata['condition-kind']
         ctag = XML.SubElement(cond_root_tag, condition_tag)
+        core_prefix = 'org.jenkins_ci.plugins.run_condition.core.'
+        logic_prefix = 'org.jenkins_ci.plugins.run_condition.logic.'
         if kind == "always":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.AlwaysRun')
+            ctag.set('class', core_prefix + 'AlwaysRun')
         elif kind == "never":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.NeverRun')
+            ctag.set('class', core_prefix + 'NeverRun')
         elif kind == "boolean-expression":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'BooleanCondition')
-            XML.SubElement(ctag, "token").text = cdata['condition-expression']
+            ctag.set('class', core_prefix + 'BooleanCondition')
+            try:
+                XML.SubElement(ctag, "token").text = \
+                    cdata['condition-expression']
+            except KeyError:
+                raise MissingAttributeError('condition-expression')
+        elif kind == "build-cause":
+            ctag.set('class', core_prefix + 'CauseCondition')
+            cause_list = ('USER_CAUSE', 'SCM_CAUSE', 'TIMER_CAUSE',
+                          'CLI_CAUSE', 'REMOTE_CAUSE', 'UPSTREAM_CAUSE',
+                          'FS_CAUSE', 'URL_CAUSE', 'IVY_CAUSE',
+                          'SCRIPT_CAUSE', 'BUILDRESULT_CAUSE')
+            cause_name = cdata.get('cause', 'USER_CAUSE')
+            if cause_name not in cause_list:
+                raise InvalidAttributeError('cause', cause_name, cause_list)
+            XML.SubElement(ctag, "buildCause").text = cause_name
+            XML.SubElement(ctag, "exclusiveCause").text = str(cdata.get(
+                'exclusive-cause', False)).lower()
+        elif kind == "day-of-week":
+            ctag.set('class', core_prefix + 'DayCondition')
+            day_selector_class_prefix = core_prefix + 'DayCondition$'
+            day_selector_classes = {
+                'weekend': day_selector_class_prefix + 'Weekend',
+                'weekday': day_selector_class_prefix + 'Weekday',
+                'select-days': day_selector_class_prefix + 'SelectDays',
+            }
+            day_selector = cdata.get('day-selector', 'weekend')
+            if day_selector not in day_selector_classes:
+                raise InvalidAttributeError('day-selector', day_selector,
+                                            day_selector_classes)
+            day_selector_tag = XML.SubElement(ctag, "daySelector")
+            day_selector_tag.set('class', day_selector_classes[day_selector])
+            if day_selector == "select-days":
+                days_tag = XML.SubElement(day_selector_tag, "days")
+                day_tag_text = ('org.jenkins__ci.plugins.run__condition.'
+                                'core.DayCondition_-Day')
+                inp_days = cdata.get('days') if cdata.get('days') else {}
+                days = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT']
+                for day_no, day in enumerate(days, 1):
+                    day_tag = XML.SubElement(days_tag, day_tag_text)
+                    XML.SubElement(day_tag, "day").text = str(day_no)
+                    XML.SubElement(day_tag, "selected").text = str(
+                        inp_days.get(day, False)).lower()
+            XML.SubElement(ctag, "useBuildTime").text = str(cdata.get(
+                'use-build-time', False)).lower()
+        elif kind == "execution-node":
+            ctag.set('class', core_prefix + 'NodeCondition')
+            allowed_nodes_tag = XML.SubElement(ctag, "allowedNodes")
+            try:
+                nodes_list = cdata['nodes']
+            except KeyError:
+                raise MissingAttributeError('nodes')
+            for node in nodes_list:
+                node_tag = XML.SubElement(allowed_nodes_tag, "string")
+                node_tag.text = node
         elif kind == "strings-match":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'StringsMatchCondition')
-            XML.SubElement(ctag, "arg1").text = cdata['condition-string1']
-            XML.SubElement(ctag, "arg2").text = cdata['condition-string2']
+            ctag.set('class', core_prefix + 'StringsMatchCondition')
+            XML.SubElement(ctag, "arg1").text = cdata.get(
+                'condition-string1', '')
+            XML.SubElement(ctag, "arg2").text = cdata.get(
+                'condition-string2', '')
             XML.SubElement(ctag, "ignoreCase").text = str(cdata.get(
                 'condition-case-insensitive', False)).lower()
         elif kind == "current-status":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'StatusCondition')
+            ctag.set('class', core_prefix + 'StatusCondition')
             wr = XML.SubElement(ctag, 'worstResult')
-            wr_name = cdata['condition-worst']
+            wr_name = cdata.get('condition-worst', 'SUCCESS')
             if wr_name not in hudson_model.THRESHOLDS:
-                raise JenkinsJobsException(
-                    "threshold must be one of %s" %
-                    ", ".join(hudson_model.THRESHOLDS.keys()))
+                raise InvalidAttributeError('condition-worst', wr_name,
+                                            hudson_model.THRESHOLDS.keys())
             wr_threshold = hudson_model.THRESHOLDS[wr_name]
             XML.SubElement(wr, "name").text = wr_threshold['name']
             XML.SubElement(wr, "ordinal").text = wr_threshold['ordinal']
@@ -1115,11 +1264,10 @@ def conditional_step(parser, xml_parent, data):
                 str(wr_threshold['complete']).lower()
 
             br = XML.SubElement(ctag, 'bestResult')
-            br_name = cdata['condition-best']
+            br_name = cdata.get('condition-best', 'SUCCESS')
             if br_name not in hudson_model.THRESHOLDS:
-                raise JenkinsJobsException(
-                    "threshold must be one of %s" %
-                    ", ".join(hudson_model.THRESHOLDS.keys()))
+                raise InvalidAttributeError('condition-best', br_name,
+                                            hudson_model.THRESHOLDS.keys())
             br_threshold = hudson_model.THRESHOLDS[br_name]
             XML.SubElement(br, "name").text = br_threshold['name']
             XML.SubElement(br, "ordinal").text = br_threshold['ordinal']
@@ -1130,36 +1278,102 @@ def conditional_step(parser, xml_parent, data):
             ctag.set('class',
                      'org.jenkins_ci.plugins.run_condition.contributed.'
                      'ShellCondition')
-            XML.SubElement(ctag, "command").text = cdata['condition-command']
+            XML.SubElement(ctag, "command").text = cdata.get(
+                'condition-command', '')
         elif kind == "windows-shell":
             ctag.set('class',
                      'org.jenkins_ci.plugins.run_condition.contributed.'
                      'BatchFileCondition')
-            XML.SubElement(ctag, "command").text = cdata['condition-command']
-        elif kind == "file-exists":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'FileExistsCondition')
-            XML.SubElement(ctag, "file").text = cdata['condition-filename']
+            XML.SubElement(ctag, "command").text = cdata.get(
+                'condition-command', '')
+        elif kind == "file-exists" or kind == "files-match":
+            if kind == "file-exists":
+                ctag.set('class', core_prefix + 'FileExistsCondition')
+                try:
+                    XML.SubElement(ctag, "file").text = \
+                        cdata['condition-filename']
+                except KeyError:
+                    raise MissingAttributeError('condition-filename')
+            else:
+                ctag.set('class', core_prefix + 'FilesMatchCondition')
+                XML.SubElement(ctag, "includes").text = ",".join(cdata.get(
+                    'include-pattern', ''))
+                XML.SubElement(ctag, "excludes").text = ",".join(cdata.get(
+                    'exclude-pattern', ''))
+            basedir_class_prefix = ('org.jenkins_ci.plugins.run_condition.'
+                                    'common.BaseDirectory$')
+            basedir_classes = {
+                'workspace': basedir_class_prefix + 'Workspace',
+                'artifact-directory': basedir_class_prefix + 'ArtifactsDir',
+                'jenkins-home': basedir_class_prefix + 'JenkinsHome'
+            }
             basedir = cdata.get('condition-basedir', 'workspace')
-            basedir_tag = XML.SubElement(ctag, "baseDir")
-            if "workspace" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$Workspace')
-            elif "artifact-directory" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$ArtifactsDir')
-            elif "jenkins-home" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$JenkinsHome')
+            if basedir not in basedir_classes:
+                raise InvalidAttributeError('condition-basedir', basedir,
+                                            basedir_classes)
+            XML.SubElement(ctag, "baseDir").set('class',
+                                                basedir_classes[basedir])
+        elif kind == "num-comp":
+            ctag.set('class', core_prefix + 'NumericalComparisonCondition')
+            try:
+                XML.SubElement(ctag, "lhs").text = cdata['lhs']
+                XML.SubElement(ctag, "rhs").text = cdata['rhs']
+            except KeyError as e:
+                raise MissingAttributeError(e.args[0])
+            comp_class_prefix = core_prefix + 'NumericalComparisonCondition$'
+            comp_classes = {
+                'less-than': comp_class_prefix + 'LessThan',
+                'greater-than': comp_class_prefix + 'GreaterThan',
+                'equal': comp_class_prefix + 'EqualTo',
+                'not-equal': comp_class_prefix + 'NotEqualTo',
+                'less-than-equal': comp_class_prefix + 'LessThanOrEqualTo',
+                'greater-than-equal': comp_class_prefix +
+                'GreaterThanOrEqualTo'
+            }
+            comp = cdata.get('comparator', 'less-than')
+            if comp not in comp_classes:
+                raise InvalidAttributeError('comparator', comp, comp_classes)
+            XML.SubElement(ctag, "comparator").set('class',
+                                                   comp_classes[comp])
+        elif kind == "regex-match":
+            ctag.set('class', core_prefix + 'ExpressionCondition')
+            XML.SubElement(ctag, "expression").text = cdata.get('regex', '')
+            XML.SubElement(ctag, "label").text = cdata.get('label', '')
+        elif kind == "time":
+            ctag.set('class', core_prefix + 'TimeCondition')
+            XML.SubElement(ctag, "earliestHours").text = cdata.get(
+                'earliest-hour', '09')
+            XML.SubElement(ctag, "earliestMinutes").text = cdata.get(
+                'earliest-min', '00')
+            XML.SubElement(ctag, "latestHours").text = cdata.get(
+                'latest-hour', '17')
+            XML.SubElement(ctag, "latestMinutes").text = cdata.get(
+                'latest-min', '30')
+            XML.SubElement(ctag, "useBuildTime").text = str(cdata.get(
+                'use-build-time', False)).lower()
         elif kind == "not":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.logic.Not')
-            notcondition = cdata['condition-operand']
+            ctag.set('class', logic_prefix + 'Not')
+            try:
+                notcondition = cdata['condition-operand']
+            except KeyError:
+                raise MissingAttributeError('condition-operand')
             build_condition(notcondition, ctag)
+        elif kind == "and" or "or":
+            if kind == "and":
+                ctag.set('class', logic_prefix + 'And')
+            else:
+                ctag.set('class', logic_prefix + 'Or')
+            conditions_tag = XML.SubElement(ctag, "conditions")
+            container_tag_text = ('org.jenkins__ci.plugins.run__condition.'
+                                  'logic.ConditionContainer')
+            try:
+                conditions_list = cdata['condition-operands']
+            except KeyError:
+                raise MissingAttributeError('condition-operands')
+            for condition in conditions_list:
+                conditions_container_tag = XML.SubElement(conditions_tag,
+                                                          container_tag_text)
+                build_condition(condition, conditions_container_tag)
 
     def build_step(parent, step):
         for edited_node in create_builders(parser, step):
@@ -1200,6 +1414,41 @@ def conditional_step(parser, xml_parent, data):
                                            evaluation_class)
     for step in steps:
         build_step(steps_parent, step)
+
+
+def maven_builder(parser, xml_parent, data):
+    """yaml: maven-builder
+    Execute Maven3 builder
+
+    :arg str name: Name of maven installation from the configuration
+    :arg str pom: Location of pom.xml (default 'pom.xml')
+    :arg str goals: Goals to execute
+    :arg str maven-opts: Additional options for maven (optional)
+
+    Requires the Jenkins `Artifactory Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/Artifactory+Plugin>`_
+    allows your build jobs to deploy artifacts automatically to Artifactory.
+
+    Example:
+
+    .. literalinclude:: /../../tests/builders/fixtures/maven-builder001.yaml
+       :language: yaml
+    """
+    maven = XML.SubElement(xml_parent, 'org.jfrog.hudson.maven3.Maven3Builder')
+
+    required = {
+        'mavenName': 'name',
+        'goals': 'goals',
+    }
+
+    for key in required:
+        try:
+            XML.SubElement(maven, key).text = data[required[key]]
+        except KeyError:
+            raise MissingAttributeError(required[key])
+
+    XML.SubElement(maven, 'rootPom').text = data.get('pom', 'pom.xml')
+    XML.SubElement(maven, 'mavenOpts').text = data.get('maven-opts', '')
 
 
 def maven_target(parser, xml_parent, data):
@@ -1907,7 +2156,9 @@ def dsl(parser, xml_parent, data):
 
     Example:
 
-    .. literalinclude:: /../../tests/builders/fixtures/dsl.yaml
+    .. literalinclude:: /../../tests/builders/fixtures/dsl001.yaml
+       :language: yaml
+    .. literalinclude:: /../../tests/builders/fixtures/dsl002.yaml
        :language: yaml
 
     """
@@ -1919,7 +2170,7 @@ def dsl(parser, xml_parent, data):
         XML.SubElement(dsl, 'scriptText').text = data.get('script-text')
         XML.SubElement(dsl, 'usingScriptText').text = 'true'
     elif data.get('target'):
-        XML.SubElement(dsl, 'target').text = data.get('target')
+        XML.SubElement(dsl, 'targets').text = data.get('target')
         XML.SubElement(dsl, 'usingScriptText').text = 'false'
     else:
         raise MissingAttributeError(['script-text', 'target'])
@@ -1969,6 +2220,29 @@ def github_notifier(parser, xml_parent, data):
     """
     XML.SubElement(xml_parent,
                    'com.cloudbees.jenkins.GitHubSetCommitStatusBuilder')
+
+
+def ssh_builder(parser, xml_parent, data):
+    """yaml: ssh-builder
+    Executes command on remote host
+    Requires the Jenkins `SSH plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/SSH+plugin>`_
+
+    :arg str ssh-user-ip: user@ip:ssh_port of machine that was defined
+                          in jenkins according to SSH plugin instructions
+    :arg str command: command to run on remote server
+
+    Example:
+
+    .. literalinclude:: /../../tests/builders/fixtures/ssh-builder.yaml
+    """
+    builder = XML.SubElement(
+        xml_parent, 'org.jvnet.hudson.plugins.SSHBuilder')
+    try:
+        XML.SubElement(builder, 'siteName').text = str(data['ssh-user-ip'])
+        XML.SubElement(builder, 'command').text = str(data['command'])
+    except KeyError as e:
+        raise MissingAttributeError("'%s'" % e.args[0])
 
 
 def sonar(parser, xml_parent, data):
@@ -2050,3 +2324,407 @@ def sonatype_clm(parser, xml_parent, data):
         data.get('module-excludes', '')).lower()
     XML.SubElement(path_config, 'scanProperties').text = str(
         data.get('advanced-options', '')).lower()
+
+
+def beaker(parser, xml_parent, data):
+    """yaml: beaker
+    Execute a beaker build step. Requires the Jenkins :jenkins-wiki:`Beaker
+    Builder Plugin <Beaker+Builder+Plugin>`.
+
+    :arg str content: Run job from string
+                      (Alternative: you can choose a path instead)
+    :arg str path: Run job from file
+                   (Alternative: you can choose a content instead)
+    :arg bool download-logs: Download Beaker log files (default false)
+
+    Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/beaker-path.yaml
+       :language: yaml
+
+    .. literalinclude:: ../../tests/builders/fixtures/beaker-content.yaml
+       :language: yaml
+    """
+    beaker = XML.SubElement(xml_parent, 'org.jenkinsci.plugins.beakerbuilder.'
+                                        'BeakerBuilder')
+    jobSource = XML.SubElement(beaker, 'jobSource')
+    if 'content' in data and 'path' in data:
+        raise JenkinsJobsException("Use just one of 'content' or 'path'")
+    elif 'content' in data:
+        jobSourceClass = "org.jenkinsci.plugins.beakerbuilder.StringJobSource"
+        jobSource.set('class', jobSourceClass)
+        XML.SubElement(jobSource, 'jobContent').text = data['content']
+    elif 'path' in data:
+        jobSourceClass = "org.jenkinsci.plugins.beakerbuilder.FileJobSource"
+        jobSource.set('class', jobSourceClass)
+        XML.SubElement(jobSource, 'jobPath').text = data['path']
+    else:
+        raise JenkinsJobsException("Use one of 'content' or 'path'")
+
+    XML.SubElement(beaker, 'downloadFiles').text = str(data.get(
+        'download-logs', False)).lower()
+
+
+def cloudformation(parser, xml_parent, data):
+    """yaml: cloudformation
+    Create cloudformation stacks before running a build and optionally
+    delete them at the end.  Requires the Jenkins :jenkins-wiki:`AWS
+    Cloudformation Plugin <AWS+Cloudformation+Plugin>`.
+
+    :arg list name: The names of the stacks to create (Required)
+    :arg str description: Description of the stack (Optional)
+    :arg str recipe: The cloudformation recipe file (Required)
+    :arg list parameters: List of key/value pairs to pass
+        into the recipe, will be joined together into a comma separated
+        string (Optional)
+    :arg int timeout: Number of seconds to wait before giving up creating
+        a stack (default 0)
+    :arg str access-key: The Amazon API Access Key (Required)
+    :arg str secret-key: The Amazon API Secret Key (Required)
+    :arg int sleep: Number of seconds to wait before continuing to the
+        next step (default 0)
+    :arg array region: The region to run cloudformation in (Required)
+
+        :region values:
+            * **us-east-1**
+            * **us-west-1**
+            * **us-west-2**
+            * **eu-central-1**
+            * **eu-west-1**
+            * **ap-southeast-1**
+            * **ap-southeast-2**
+            * **ap-northeast-1**
+            * **sa-east-1**
+
+    Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/cloudformation.yaml
+       :language: yaml
+    """
+    region_dict = cloudformation_region_dict()
+    stacks = cloudformation_init(xml_parent, data, 'CloudFormationBuildStep')
+    for stack in data:
+        cloudformation_stack(xml_parent, stack, 'PostBuildStackBean', stacks,
+                             region_dict)
+
+
+def openshift_build_verify(parser, xml_parent, data):
+    """yaml: openshift-build-verify
+    Performs the equivalent of an 'oc get builds` command invocation for the
+    provided buildConfig key provided; once the list of builds are obtained,
+    the state of the latest build is inspected for up to a minute to see if
+    it has completed successfully.
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str bld-cfg: The value here should be whatever was the output
+        form `oc project` when you created the BuildConfig you
+        want to run a Build on (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-build-verify001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-build-verify002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftBuildVerifier')
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("bld-cfg", 'bldCfg', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_builder(parser, xml_parent, data):
+    """yaml: openshift-builder
+    Perform builds in OpenShift for the job.
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str bld-cfg: The value here should be whatever was the output
+        form `oc project` when you created the BuildConfig you want to run a
+        Build on (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+    :arg bool follow-log: The equivalent of using the --follow option with the
+        `oc start-build` command. (default: true)
+
+    Full Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/openshift-builder001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/openshift-builder002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftBuilder')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("bld-cfg", 'bldCfg', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("auth-token", 'authToken', ''),
+        ("follow-log", 'followLog', 'true'),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_dep_verify(parser, xml_parent, data):
+    """yaml: openshift-dep-verify
+    Determines whether the expected set of DeploymentConfig's,
+    ReplicationController's, and active replicas are present based on prior
+    use of the scaler (2) and deployer (3) steps
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str dep-cfg: The value here should be whatever was the output
+        form `oc project` when you created the BuildConfig you want to run a
+        Build on (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str replica-count: The value here should be whatever the number
+        of pods you want started for the deployment. (default: 0)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-dep-verify001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-dep-verify002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.'
+                         'OpenShiftDeploymentVerifier')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("dep-cfg", 'depCfg', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("replica-count", 'replicaCount', 0),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_deployer(parser, xml_parent, data):
+    """yaml: openshift-deployer
+    Start a deployment in OpenShift for the job.
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str dep-cfg: The value here should be whatever was the output
+        form `oc project` when you created the BuildConfig you want to run a
+        Build on (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-deployer001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-deployer002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftDeployer')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("dep-cfg", 'depCfg', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_img_tagger(parser, xml_parent, data):
+    """yaml: openshift-img-tagger
+    Performs the equivalent of an oc tag command invocation in order to
+    manipulate tags for images in OpenShift ImageStream's
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str test-tag: The equivalent to the name supplied to a
+        `oc get service` command line invocation.
+        (default: origin-nodejs-sample:latest)
+    :arg str prod-tag: The equivalent to the name supplied to a
+        `oc get service` command line invocation.
+        (default: origin-nodejs-sample:prod)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-img-tagger001.yaml
+        :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-img-tagger002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftImageTagger')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("test-tag", 'testTag', 'origin-nodejs-sample:latest'),
+        ("prod-tag", 'prodTag', 'origin-nodejs-sample:prod'),
+        ("namespace", 'namespace', 'test'),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_scaler(parser, xml_parent, data):
+    """yaml: openshift-scaler
+    Scale deployments in OpenShift for the job.
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default \https://openshift.default.svc.cluster.local\)
+    :arg str dep-cfg: The value here should be whatever was the output
+        form `oc project` when you created the BuildConfig you want to run a
+        Build on (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str replica-count: The value here should be whatever the number
+        of pods you want started for the deployment. (default: 0)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/openshift-scaler001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude:: ../../tests/builders/fixtures/openshift-scaler002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftScaler')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("dep-cfg", 'depCfg', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("replica-count", 'replicaCount', 0),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)
+
+
+def openshift_svc_verify(parser, xml_parent, data):
+    """yaml: openshift-svc-verify
+    Verify a service is up in OpenShift for the job.
+    Requires the Jenkins `OpenShift3 Plugin
+    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+
+    :arg str api-url: this would be the value you specify if you leverage the
+        --server option on the OpenShift `oc` command.
+        (default: \https://openshift.default.svc.cluster.local\)
+    :arg str svc-name: The equivalent to the name supplied to a
+        `oc get service` command line invocation. (default: frontend)
+    :arg str namespace: If you run `oc get bc` for the project listed in
+        "namespace", that is the value you want to put here. (default: test)
+    :arg str auth-token: The value here is what you supply with the --token
+        option when invoking the OpenShift `oc` command. (optional)
+
+    Full Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-svc-verify001.yaml
+       :language: yaml
+
+    Minimal Example:
+
+    .. literalinclude::
+        ../../tests/builders/fixtures/openshift-svc-verify002.yaml
+       :language: yaml
+    """
+    osb = XML.SubElement(xml_parent,
+                         'com.openshift.'
+                         'openshiftjenkinsbuildutils.OpenShiftServiceVerifier')
+
+    mapping = [
+        # option, xml name, default value
+        ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
+        ("svc-name", 'svcName', 'frontend'),
+        ("namespace", 'namespace', 'test'),
+        ("auth-token", 'authToken', ''),
+    ]
+
+    convert_mapping_to_xml(osb, data, mapping)

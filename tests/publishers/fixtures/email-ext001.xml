@@ -159,13 +159,14 @@
           </email>
         </hudson.plugins.emailext.plugins.trigger.PreBuildTrigger>
       </configuredTriggers>
-	  <contentType>text/html</contentType>
+      <contentType>text/html</contentType>
       <defaultSubject>Subject for Build ${BUILD_NUMBER}</defaultSubject>
       <defaultContent>The build has finished</defaultContent>
       <attachmentsPattern>*/foo*.log</attachmentsPattern>
       <presendScript>cancel=true</presendScript>
       <attachBuildLog>false</attachBuildLog>
       <saveOutput>true</saveOutput>
+      <disabled>false</disabled>
       <replyTo>foo@example.com</replyTo>
       <matrixTriggerMode>ONLY_CONFIGURATIONS</matrixTriggerMode>
     </hudson.plugins.emailext.ExtendedEmailPublisher>

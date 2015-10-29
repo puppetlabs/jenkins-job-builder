@@ -34,7 +34,7 @@ Example::
 
 import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
-from jenkins_jobs.errors import JenkinsJobsException
+from jenkins_jobs.errors import InvalidAttributeError, JenkinsJobsException
 import logging
 
 
@@ -72,14 +72,9 @@ def ownership(parser, xml_parent, data):
     :arg str owner: the owner of job
     :arg list co-owners: list of job co-owners
 
-    Example::
+    Example:
 
-        properties:
-         - ownership:
-            owner: abraverm
-            co-owners:
-             - lbednar
-             - edolinin
+    .. literalinclude:: /../../tests/properties/fixtures/ownership.yaml
     """
     ownership_plugin = \
         XML.SubElement(xml_parent,
@@ -205,6 +200,33 @@ def throttle(parser, xml_parent, data):
 
     XML.SubElement(throttle, 'throttleOption').text = data.get('option')
     XML.SubElement(throttle, 'configVersion').text = '1'
+
+
+def sidebar(parser, xml_parent, data):
+    """yaml: sidebar
+    Allows you to add links in the sidebar.
+    Requires the Jenkins :jenkins-wiki:`Sidebar-Link Plugin
+    <Sidebar-Link+Plugin>`.
+
+    :arg str url: url to link to (optional)
+    :arg str text: text for the link (optional)
+    :arg str icon: path to icon (optional)
+
+    Example:
+
+    .. literalinclude:: /../../tests/properties/fixtures/sidebar02.yaml
+    """
+    sidebar = xml_parent.find('hudson.plugins.sidebar__link.ProjectLinks')
+    if sidebar is None:
+        sidebar = XML.SubElement(xml_parent,
+                                 'hudson.plugins.sidebar__link.ProjectLinks')
+        links = XML.SubElement(sidebar, 'links')
+    else:
+        links = sidebar.find('links')
+    action = XML.SubElement(links, 'hudson.plugins.sidebar__link.LinkAction')
+    XML.SubElement(action, 'url').text = str(data.get('url', ''))
+    XML.SubElement(action, 'text').text = str(data.get('text', ''))
+    XML.SubElement(action, 'icon').text = str(data.get('icon', ''))
 
 
 def inject(parser, xml_parent, data):
@@ -389,19 +411,21 @@ def build_blocker(parser, xml_parent, data):
     <Build+Blocker+Plugin>`.
 
     :arg bool use-build-blocker: Enable or disable build blocker
-        (optional) (default true)
+        (default true)
     :arg list blocking-jobs: One regular expression per line
         to select blocking jobs by their names. (required)
 
+    :arg str block-level: block build globally ('GLOBAL') or per node ('NODE')
+        (default 'GLOBAL')
 
-    Example::
+    :arg str queue-scanning: scan build queue for all builds ('ALL') or only
+        buildable builds ('BUILDABLE') (default 'DISABLED'))
 
-        properties:
-          - build-blocker:
-              use-build-blocker: true
-              blocking-jobs:
-                - ".*-deploy"
-                - "^maintenance.*"
+
+    Example:
+
+    .. literalinclude:: \
+            /../../tests/properties/fixtures/build-blocker01.yaml
     """
     blocker = XML.SubElement(xml_parent,
                              'hudson.plugins.'
@@ -416,6 +440,22 @@ def build_blocker(parser, xml_parent, data):
     for value in data['blocking-jobs']:
         jobs = jobs + value + '\n'
     XML.SubElement(blocker, 'blockingJobs').text = jobs
+
+    block_level_list = ('GLOBAL', 'NODE')
+    block_level = data.get('block-level', 'GLOBAL')
+    if block_level not in block_level_list:
+        raise InvalidAttributeError('block-level',
+                                    block_level,
+                                    block_level_list)
+    XML.SubElement(blocker, 'blockLevel').text = block_level
+
+    queue_scanning_list = ('DISABLED', 'ALL', 'BUILDABLE')
+    queue_scanning = data.get('queue-scanning', 'DISABLED')
+    if queue_scanning not in queue_scanning_list:
+        raise InvalidAttributeError('queue-scanning',
+                                    queue_scanning,
+                                    queue_scanning_list)
+    XML.SubElement(blocker, 'scanQueueFor').text = queue_scanning
 
 
 def copyartifact(parser, xml_parent, data):

@@ -2,10 +2,11 @@ import os
 from six.moves import configparser, StringIO
 import testtools
 from jenkins_jobs import cmd
+from tests.base import LoggingFixture
 from tests.base import mock
 
 
-class CmdTestsBase(testtools.TestCase):
+class CmdTestsBase(LoggingFixture, testtools.TestCase):
 
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
     parser = cmd.create_parser()
@@ -18,16 +19,13 @@ class CmdTestsBase(testtools.TestCase):
         # are run in parallel.  Stub out the CacheStorage to ensure that each
         # test can safely create the cache directory without risk of
         # interference.
-        self.cache_patch = mock.patch('jenkins_jobs.builder.CacheStorage',
-                                      autospec=True)
-        self.cache_patch.start()
+        cache_patch = mock.patch('jenkins_jobs.builder.CacheStorage',
+                                 autospec=True)
+        self.cache_mock = cache_patch.start()
+        self.addCleanup(cache_patch.stop)
 
         self.config = configparser.ConfigParser()
         self.config.readfp(StringIO(cmd.DEFAULT_CONF))
-
-    def tearDown(self):
-        self.cache_patch.stop()
-        super(CmdTestsBase, self).tearDown()
 
 
 class CmdTests(CmdTestsBase):

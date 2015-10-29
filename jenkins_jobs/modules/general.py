@@ -21,8 +21,8 @@ Example:
 
 :Job Parameters:
     * **project-type**:
-      Defaults to "freestyle", but "maven" as well as "multijob" or "flow"
-      can also be specified.
+      Defaults to "freestyle", but "maven" as well as "multijob", "flow" or
+      "externaljob" can also be specified.
 
     * **defaults**:
       Specifies a set of :ref:`defaults` to use for this job, defaults to
@@ -55,6 +55,10 @@ Example:
     * **workspace**:
       Path for a custom workspace. Defaults to Jenkins default
       configuration.
+
+    * **child-workspace**:
+      Path for a child custom workspace. Defaults to Jenkins default
+      configuration. This parameter is only valid for matrix type jobs.
 
     * **quiet-period**:
       Number of seconds to wait between consecutive runs of this job.
@@ -95,6 +99,7 @@ Example:
 
 import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
+from jenkins_jobs.xml_config import remove_ignorable_whitespace
 
 
 class General(jenkins_jobs.modules.base.Base):
@@ -139,6 +144,9 @@ class General(jenkins_jobs.modules.base.Base):
         if 'workspace' in data:
             XML.SubElement(xml, 'customWorkspace').text = \
                 str(data['workspace'])
+        if (xml.tag == 'matrix-project') and ('child-workspace' in data):
+            XML.SubElement(xml, 'childCustomWorkspace').text = \
+                str(data['child-workspace'])
         if 'quiet-period' in data:
             XML.SubElement(xml, 'quietPeriod').text = str(data['quiet-period'])
         node = data.get('node', None)
@@ -168,4 +176,5 @@ def raw(parser, xml_parent, data):
     # documented in definition.rst since includes and docs is not working well
     # For cross cutting method like this
     root = XML.fromstring(data.get('xml'))
+    remove_ignorable_whitespace(root)
     xml_parent.append(root)

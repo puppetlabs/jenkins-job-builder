@@ -17,11 +17,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import codecs
-import logging
+import io
 import os
 import re
 import doctest
+import logging
+import fixtures
 import json
 import operator
 import testtools
@@ -36,13 +37,16 @@ try:
     from unittest import mock
 except ImportError:
     import mock  # noqa
+
+from jenkins_jobs.cmd import DEFAULT_CONF
 import jenkins_jobs.local_yaml as yaml
 from jenkins_jobs.parser import YamlParser
 from jenkins_jobs.xml_config import XmlJob
 from jenkins_jobs.modules import (project_flow,
                                   project_matrix,
                                   project_maven,
-                                  project_multijob)
+                                  project_multijob,
+                                  project_externaljob)
 
 
 def get_scenarios(fixtures_path, in_ext='yaml', out_ext='xml',
@@ -78,7 +82,7 @@ def get_scenarios(fixtures_path, in_ext='yaml', out_ext='xml',
         if plugins_info_candidate not in files:
             plugins_info_candidate = None
 
-        conf_candidate = re.sub(r'\.yaml$', '.conf', input_filename)
+        conf_candidate = re.sub(r'\.yaml$|\.json$', '.conf', input_filename)
         # If present, add the configuration file
         if conf_candidate not in files:
             conf_candidate = None
@@ -93,7 +97,15 @@ def get_scenarios(fixtures_path, in_ext='yaml', out_ext='xml',
     return scenarios
 
 
-class BaseTestCase(object):
+class LoggingFixture(object):
+
+    def setUp(self):
+
+        super(LoggingFixture, self).setUp()
+        self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+
+
+class BaseTestCase(LoggingFixture):
     scenarios = []
     fixtures_path = None
 
@@ -101,32 +113,34 @@ class BaseTestCase(object):
     maxDiff = None      # always dump text difference
     longMessage = True  # keep normal error message when providing our
 
-    logging.basicConfig()
-
     def _read_utf8_content(self):
         # if None assume empty file
         if self.out_filename is None:
             return u""
 
         # Read XML content, assuming it is unicode encoded
-        xml_content = u"%s" % codecs.open(self.out_filename,
-                                          'r', 'utf-8').read()
+        xml_content = u"%s" % io.open(self.out_filename,
+                                      'r', encoding='utf-8').read()
         return xml_content
 
     def _read_yaml_content(self, filename):
-        with open(filename, 'r') as yaml_file:
+        with io.open(filename, 'r', encoding='utf-8') as yaml_file:
             yaml_content = yaml.load(yaml_file)
         return yaml_content
+
+    def _get_config(self):
+        config = configparser.ConfigParser()
+        config.readfp(StringIO(DEFAULT_CONF))
+        if self.conf_filename is not None:
+            with io.open(self.conf_filename, 'r', encoding='utf-8') as cf:
+                config.readfp(cf)
+        return config
 
     def test_yaml_snippet(self):
         if not self.in_filename:
             return
 
-        if self.conf_filename is not None:
-            config = configparser.ConfigParser()
-            config.readfp(open(self.conf_filename))
-        else:
-            config = {}
+        config = self._get_config()
 
         expected_xml = self._read_utf8_content()
         yaml_content = self._read_yaml_content(self.in_filename)
@@ -140,6 +154,8 @@ class BaseTestCase(object):
                 project = project_flow.Flow(None)
             elif (yaml_content['project-type'] == "multijob"):
                 project = project_multijob.MultiJob(None)
+            elif (yaml_content['project-type'] == "externaljob"):
+                project = project_externaljob.ExternalJob(None)
 
         if project:
             xml_project = project.root_xml(yaml_content)
@@ -168,20 +184,16 @@ class BaseTestCase(object):
             pretty_xml,
             testtools.matchers.DocTestMatches(expected_xml,
                                               doctest.ELLIPSIS |
-                                              doctest.NORMALIZE_WHITESPACE |
                                               doctest.REPORT_NDIFF)
         )
 
 
 class SingleJobTestCase(BaseTestCase):
     def test_yaml_snippet(self):
+        config = self._get_config()
+
         expected_xml = self._read_utf8_content()
 
-        if self.conf_filename:
-            config = configparser.ConfigParser()
-            config.readfp(open(self.conf_filename))
-        else:
-            config = None
         parser = YamlParser(config)
         parser.parse(self.in_filename)
 
@@ -199,7 +211,6 @@ class SingleJobTestCase(BaseTestCase):
             pretty_xml,
             testtools.matchers.DocTestMatches(expected_xml,
                                               doctest.ELLIPSIS |
-                                              doctest.NORMALIZE_WHITESPACE |
                                               doctest.REPORT_NDIFF)
         )
 
@@ -217,7 +228,6 @@ class JsonTestCase(BaseTestCase):
             pretty_json,
             testtools.matchers.DocTestMatches(expected_json,
                                               doctest.ELLIPSIS |
-                                              doctest.NORMALIZE_WHITESPACE |
                                               doctest.REPORT_NDIFF)
         )
 
@@ -239,6 +249,5 @@ class YamlTestCase(BaseTestCase):
             pretty_yaml,
             testtools.matchers.DocTestMatches(expected_yaml,
                                               doctest.ELLIPSIS |
-                                              doctest.NORMALIZE_WHITESPACE |
                                               doctest.REPORT_NDIFF)
         )

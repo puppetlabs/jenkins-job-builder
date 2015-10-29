@@ -14,21 +14,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import mock
 
 import jenkins_jobs.builder
-
+from tests.base import LoggingFixture
+from tests.base import mock
 from testtools import TestCase
 
 
-class TestCaseTestBuilder(TestCase):
+@mock.patch('jenkins_jobs.builder.CacheStorage', mock.MagicMock)
+class TestCaseTestBuilder(LoggingFixture, TestCase):
     def setUp(self):
+        super(TestCaseTestBuilder, self).setUp()
         self.builder = jenkins_jobs.builder.Builder(
             'http://jenkins.example.com',
             'doesnot', 'matter',
             plugins_list=['plugin1', 'plugin2'],
         )
-        TestCase.setUp(self)
 
     def test_plugins_list(self):
         self.assertEqual(self.builder.plugins_list, ['plugin1', 'plugin2'])

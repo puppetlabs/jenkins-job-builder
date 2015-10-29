@@ -10,6 +10,7 @@ triggers:
         - org1
         - org2
       cron: '* * * * *'
+      build-desc-template: "build description"
       trigger-phrase: 'retest this please'
       only-trigger-phrase: true
       github-hooks: true
@@ -19,3 +20,4 @@ triggers:
       white-list-target-branches:
         - master
         - testing
+      auth-id: '123-456-789'

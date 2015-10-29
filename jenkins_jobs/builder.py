@@ -16,14 +16,12 @@
 # Manage jobs in Jenkins server
 
 import errno
+import io
 import os
 import operator
-import sys
 import hashlib
 import yaml
 import xml.etree.ElementTree as XML
-import xml
-from xml.dom import minidom
 import jenkins
 import re
 from pprint import pformat
@@ -31,45 +29,11 @@ import logging
 
 from jenkins_jobs.constants import MAGIC_MANAGE_STRING
 from jenkins_jobs.parser import YamlParser
+from jenkins_jobs import utils
 
 logger = logging.getLogger(__name__)
 
-
-# Python 2.6's minidom toprettyxml produces broken output by adding extraneous
-# whitespace around data. This patches the broken implementation with one taken
-# from Python > 2.7.3
-def writexml(self, writer, indent="", addindent="", newl=""):
-    # indent = current indentation
-    # addindent = indentation to add to higher levels
-    # newl = newline string
-    writer.write(indent + "<" + self.tagName)
-
-    attrs = self._get_attributes()
-    a_names = attrs.keys()
-    a_names.sort()
-
-    for a_name in a_names:
-        writer.write(" %s=\"" % a_name)
-        minidom._write_data(writer, attrs[a_name].value)
-        writer.write("\"")
-    if self.childNodes:
-        writer.write(">")
-        if (len(self.childNodes) == 1 and
-                self.childNodes[0].nodeType == minidom.Node.TEXT_NODE):
-            self.childNodes[0].writexml(writer, '', '', '')
-        else:
-            writer.write(newl)
-            for node in self.childNodes:
-                node.writexml(writer, indent + addindent, addindent, newl)
-            writer.write(indent)
-        writer.write("</%s>%s" % (self.tagName, newl))
-    else:
-        writer.write("/>%s" % (newl))
-
-# PyXML xml.__name__ is _xmlplus. Check that if we don't have the default
-# system version of the minidom, then patch the writexml method
-if sys.version_info[:3] < (2, 7, 3) or xml.__name__ != 'xml':
-    minidom.Element.writexml = writexml
+_DEFAULT_TIMEOUT = object()
 
 
 class CacheStorage(object):
@@ -89,7 +53,7 @@ class CacheStorage(object):
         if flush or not os.path.isfile(self.cachefilename):
             self.data = {}
         else:
-            with open(self.cachefilename, 'r') as yfile:
+            with io.open(self.cachefilename, 'r', encoding='utf-8') as yfile:
                 self.data = yaml.load(yfile)
         logger.debug("Using cache: '{0}'".format(self.cachefilename))
 
@@ -108,6 +72,9 @@ class CacheStorage(object):
     def set(self, job, md5):
         self.data[job] = md5
 
+    def clear(self):
+        self.data.clear()
+
     def is_cached(self, job):
         if job in self.data:
             return True
@@ -123,7 +90,8 @@ class CacheStorage(object):
         # due to an exception occurring in the __init__
         if getattr(self, 'data', None) is not None:
             try:
-                with open(self.cachefilename, 'w') as yfile:
+                with io.open(self.cachefilename, 'w',
+                             encoding='utf-8') as yfile:
                     self._yaml.dump(self.data, yfile)
             except Exception as e:
                 self._logger.error("Failed to write to cache file '%s' on "
@@ -138,8 +106,11 @@ class CacheStorage(object):
 
 
 class Jenkins(object):
-    def __init__(self, url, user, password):
-        self.jenkins = jenkins.Jenkins(url, user, password)
+    def __init__(self, url, user, password, timeout=_DEFAULT_TIMEOUT):
+        if timeout != _DEFAULT_TIMEOUT:
+            self.jenkins = jenkins.Jenkins(url, user, password, timeout)
+        else:
+            self.jenkins = jenkins.Jenkins(url, user, password)
         self._jobs = None
         self._job_list = None
 
@@ -182,6 +153,13 @@ class Jenkins(object):
             logger.info("Deleting jenkins job {0}".format(job_name))
             self.jenkins.delete_job(job_name)
 
+    def delete_all_jobs(self):
+        # execute a groovy script to delete all jobs is much faster than
+        # using the doDelete REST endpoint to delete one job at a time.
+        script = ('for(job in jenkins.model.Jenkins.theInstance.getProjects())'
+                  '       { job.delete(); }')
+        self.jenkins.run_script(script)
+
     def get_plugins_info(self):
         """ Return a list of plugin_info dicts, one for each plugin on the
         Jenkins instance.
@@ -221,9 +199,10 @@ class Jenkins(object):
 
 class Builder(object):
     def __init__(self, jenkins_url, jenkins_user, jenkins_password,
-                 config=None, ignore_cache=False, flush_cache=False,
-                 plugins_list=None):
-        self.jenkins = Jenkins(jenkins_url, jenkins_user, jenkins_password)
+                 config=None, jenkins_timeout=_DEFAULT_TIMEOUT,
+                 ignore_cache=False, flush_cache=False, plugins_list=None):
+        self.jenkins = Jenkins(jenkins_url, jenkins_user, jenkins_password,
+                               jenkins_timeout)
         self.cache = CacheStorage(jenkins_url, flush=flush_cache)
         self.global_config = config
         self.ignore_cache = ignore_cache
@@ -238,8 +217,9 @@ class Builder(object):
     def load_files(self, fn):
         self.parser = YamlParser(self.global_config, self.plugins_list)
 
-        # handle deprecated behavior
-        if not hasattr(fn, '__iter__'):
+        # handle deprecated behavior, and check that it's not a file like
+        # object as these may implement the '__iter__' attribute.
+        if not hasattr(fn, '__iter__') or hasattr(fn, 'read'):
             logger.warning(
                 'Passing single elements for the `fn` argument in '
                 'Builder.load_files is deprecated. Please update your code '
@@ -249,7 +229,7 @@ class Builder(object):
 
         files_to_process = []
         for path in fn:
-            if os.path.isdir(path):
+            if not hasattr(path, 'read') and os.path.isdir(path):
                 files_to_process.extend([os.path.join(path, f)
                                          for f in os.listdir(path)
                                          if (f.endswith('.yml')
@@ -261,6 +241,9 @@ class Builder(object):
         # definitions of macros and templates when loading all from top-level
         unique_files = []
         for f in files_to_process:
+            if hasattr(f, 'read'):
+                unique_files.append(f)
+                continue
             rpf = os.path.realpath(f)
             if rpf not in unique_files:
                 unique_files.append(rpf)
@@ -282,9 +265,11 @@ class Builder(object):
             else:
                 self.parser.parse(in_file)
 
-    def delete_old_managed(self, keep):
+    def delete_old_managed(self, keep=None):
         jobs = self.jenkins.get_jobs()
         deleted_jobs = 0
+        if keep is None:
+            keep = [job.name for job in self.parser.xml_jobs]
         for job in jobs:
             if job['name'] not in keep and \
                     self.jenkins.is_managed(job['name']):
@@ -315,8 +300,9 @@ class Builder(object):
     def delete_all_jobs(self):
         jobs = self.jenkins.get_jobs()
         logger.info("Number of jobs to delete:  %d", len(jobs))
-        for job in jobs:
-            self.delete_job(job['name'])
+        self.jenkins.delete_all_jobs()
+        # Need to clear the JJB cache after deletion
+        self.cache.clear()
 
     def update_job(self, input_fn, jobs_glob=None, output=None):
         self.load_files(input_fn)
@@ -342,6 +328,7 @@ class Builder(object):
                     # `output` is a file-like object
                     logger.info("Job name:  %s", job.name)
                     logger.debug("Writing XML to '{0}'".format(output))
+                    output = utils.wrap_stream(output)
                     try:
                         output.write(job.output())
                     except IOError as exc:
@@ -355,9 +342,8 @@ class Builder(object):
 
                 output_fn = os.path.join(output, job.name)
                 logger.debug("Writing XML to '{0}'".format(output_fn))
-                f = open(output_fn, 'w')
-                f.write(job.output())
-                f.close()
+                with io.open(output_fn, 'w', encoding='utf-8') as f:
+                    f.write(job.output().decode('utf-8'))
                 continue
             md5 = job.md5()
             if (self.jenkins.is_job(job.name)
@@ -366,7 +352,7 @@ class Builder(object):
                 self.cache.set(job.name, old_md5)
 
             if self.cache.has_changed(job.name, md5) or self.ignore_cache:
-                self.jenkins.update_job(job.name, job.output())
+                self.jenkins.update_job(job.name, job.output().decode('utf-8'))
                 updated_jobs += 1
                 self.cache.set(job.name, md5)
             else:

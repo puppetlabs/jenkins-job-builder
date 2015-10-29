@@ -4,13 +4,14 @@
     <org.jenkinsci.plugins.ghprb.GhprbTrigger>
       <spec>* * * * *</spec>
       <adminlist>user1
-        user2</adminlist>
+user2</adminlist>
       <allowMembersOfWhitelistedOrgsAsAdmin>true</allowMembersOfWhitelistedOrgsAsAdmin>
       <whitelist>user3
-        user4</whitelist>
+user4</whitelist>
       <orgslist>org1
-        org2</orgslist>
+org2</orgslist>
       <cron>* * * * *</cron>
+      <buildDescTemplate>build description</buildDescTemplate>
       <triggerPhrase>retest this please</triggerPhrase>
       <onlyTriggerPhrase>true</onlyTriggerPhrase>
       <useGitHubHooks>true</useGitHubHooks>
@@ -24,6 +25,7 @@
           <branch>testing</branch>
         </org.jenkinsci.plugins.ghprb.GhprbBranch>
       </whiteListTargetBranches>
+      <gitHubAuthId>123-456-789</gitHubAuthId>
     </org.jenkinsci.plugins.ghprb.GhprbTrigger>
   </triggers>
 </project>
