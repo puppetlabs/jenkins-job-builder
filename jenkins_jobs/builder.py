@@ -122,6 +122,9 @@ class Jenkins(object):
 
     def update_job(self, job_name, xml):
         if self.is_job(job_name):
+            if self.is_changing_job_project_type(job_name, xml):
+                logger.error("The jenkins job '{0}' is trying to change the project type this will fail in jenkins".format(job_name))
+                #TODO: this is only logging the error we should fix the issue by deleting the job first
             logger.info("Reconfiguring jenkins job {0}".format(job_name))
             self.jenkins.reconfig_job(job_name, xml)
         else:
@@ -177,6 +180,25 @@ class Jenkins(object):
             out = XML.fromstring(xml)
             description = out.find(".//description").text
             return description.endswith(MAGIC_MANAGE_STRING)
+        except (TypeError, AttributeError):
+            pass
+        return False
+
+    def is_changing_job_project_type(self, job_name, updated_job_xml):
+        """ Return True if the job project type is changing (eg from freestyle
+        to matrix)
+        """
+        logger.debug("Checking project type for job name: {0}".format(job_name))
+        try:
+            #TODO: should probably have a cache for the root element of each job?
+            xml = self.jenkins.get_job_config(job_name)
+            root = XML.fromstring(xml)
+            root_tag = root.tag
+            logger.debug("Jenkins current job root XML tag: {0}".format(root_tag))
+            updated_root = XML.fromstring(updated_job_xml)
+            updated_root_tag = updated_root.tag
+            logger.debug("Jenkins updated job root XML tag: {0}".format(updated_root_tag))
+            return root_tag != updated_root_tag
         except (TypeError, AttributeError):
             pass
         return False
@@ -331,7 +353,6 @@ class Builder(object):
                     and not self.cache.is_cached(job.name)):
                 old_md5 = self.jenkins.get_job_md5(job.name)
                 self.cache.set(job.name, old_md5)
-
             if self.cache.has_changed(job.name, md5) or self.ignore_cache:
                 self.jenkins.update_job(job.name, job.output())
                 updated_jobs += 1

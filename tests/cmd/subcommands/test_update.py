@@ -39,12 +39,13 @@ class UpdateTests(CmdTestsBase):
         cmd.execute(args, self.config)
         update_job_mock.assert_called_with([path], [])
 
+    @mock.patch('jenkins_jobs.builder.Jenkins.is_changing_job_project_type', return_value=False)
     @mock.patch('jenkins_jobs.builder.Jenkins.is_job', return_value=True)
     @mock.patch('jenkins_jobs.builder.Jenkins.get_jobs')
     @mock.patch('jenkins_jobs.builder.Builder.delete_job')
     @mock.patch('jenkins_jobs.cmd.Builder')
     def test_update_jobs_and_delete_old(self, builder_mock, delete_job_mock,
-                                        get_jobs_mock, is_job_mock):
+                                        get_jobs_mock, is_job_mock, is_changing_job_project_type_mock):
         """
         Test update behaviour with --delete-old option
 
