@@ -50,6 +50,27 @@ def remove_ignorable_whitespace(node):
         remove_ignorable_whitespace(child)
 
 
+def xml_elements_tostring(node):
+    """ Makes sure to stringify node.text members when they are not string or None
+
+    It would happen that some node.text were loaded with other types like bool or list, which at
+    this point of xml generation errors out with library XML methods like dump() or tostring()
+
+    This should really be dealt with at the xml creation step & ensure valid data, but I cannot go
+    over it all so I'm lazily adding a default sanity method.
+
+    This may create 'dirty' strings for example save a list as its string representation in python
+    is ['one', 'two', 'three'].
+
+    :param node: a xml.etree.ElementTree to traverse
+    """
+    if type(node.text) is not str and node.text is not None:
+        node.text = str(node.text)
+
+    for child in node:
+        xml_elements_tostring(child)
+
+
 class XmlJob(object):
     def __init__(self, xml, name):
         self.xml = xml
@@ -59,6 +80,8 @@ class XmlJob(object):
         return hashlib.md5(self.output()).hexdigest()
 
     def output(self):
+        xml_elements_tostring(self.xml)
+        # XML.dump(self.xml) # this debug method could fail if the element text was not a str
         out = minidom.parseString(XML.tostring(self.xml, encoding='UTF-8'))
         return out.toprettyxml(indent='  ', encoding='utf-8')
 
