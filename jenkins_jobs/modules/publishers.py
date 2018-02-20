@@ -6418,23 +6418,48 @@ def hipchat(registry, xml_parent, data):
     hipchat = XML.SubElement(
         xml_parent,
         'jenkins.plugins.hipchat.HipChatNotifier')
-    XML.SubElement(hipchat, 'token').text = str(
-        data.get('token', ''))
+
+    if 'token' in data:
+        XML.SubElement(hipchat, 'credentialId').text = str(
+            data.get('token', ''))
 
     if 'rooms' in data:
-        XML.SubElement(hipchat, 'room').text = str(
-            ",".join(data['rooms']))
+        if isinstance(data['rooms'], str):
+            XML.SubElement(hipchat, 'room').text = str(data['rooms'])
+        else:
+            XML.SubElement(hipchat, 'room').text = str(
+                ",".join(data['rooms']))
 
+    # Map key to expected XML value
     mapping = [
-        ('notify-start', 'startNotification', False),
-        ('notify-success', 'notifySuccess', False),
-        ('notify-aborted', 'notifyAborted', False),
-        ('notify-not-built', 'notifyNotBuilt', False),
-        ('notify-unstable', 'notifyUnstable', False),
-        ('notify-failure', 'notifyFailure', False),
-        ('notify-back-to-normal', 'notifyBackToNormal', False),
+        ('notify-start', 'STARTED', 'GREEN'),
+        ('notify-success', 'SUCCESS', 'GREEN'),
+        ('notify-aborted', 'ABORTED', 'GRAY'),
+        ('notify-not-built', 'NOT_BUILT', 'GRAY'),
+        ('notify-unstable', 'UNSTABLE', 'YELLOW'),
+        ('notify-failure', 'FAILURE', 'RED'),
+        ('notify-back-to-normal', 'BACK_TO_NORMAL', 'GREEN'),
     ]
-    helpers.convert_mapping_to_xml(hipchat, data, mapping, fail_required=True)
+
+    notifications = XML.SubElement(hipchat, 'notifications')
+    for elem in mapping:
+        (optname, xmlname, color) = elem[:3]
+        if optname in data and data[optname] is True:
+            conf = XML.SubElement(notifications, 'jenkins.plugins.hipchat.model.NotificationConfig')
+            XML.SubElement(conf, 'notifyEnabled').text = 'false'
+            XML.SubElement(conf, 'textFormat').text = 'false'
+            XML.SubElement(conf, 'notificationType').text = xmlname
+            optname_color = optname + "-color"
+            if optname_color in data and data[optname_color] != '':
+                XML.SubElement(conf, 'color').text = str(data[optname_color])
+            else:
+                XML.SubElement(conf, 'color').text = color
+            optname_message = optname + "-message"
+            if optname_message in data and data[optname_message] != '':
+                XML.SubElement(conf, 'messageTemplate').text = str(data[optname_message])
+            else:
+                XML.SubElement(conf, 'messageTemplate')
+
 
     # optional settings, so only add XML in if set.
     if 'start-message' in data:
