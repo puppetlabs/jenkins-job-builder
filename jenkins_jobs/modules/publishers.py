@@ -6409,6 +6409,13 @@ def hipchat(registry, xml_parent, data):
         (optional)
     :arg str complete-message: This will override the default complete message
         (optional)
+    :arg str matrix-mode: post message for each cell or only the parent
+        (default 'ONLY_PARENT')
+        Possible Options
+
+        * **ONLY_PARENT**
+        * **ONLY_CONFIGURATIONS**
+        * **BOTH**
 
     Example:
 
@@ -6460,6 +6467,10 @@ def hipchat(registry, xml_parent, data):
             else:
                 XML.SubElement(conf, 'messageTemplate')
 
+    if 'matrix-mode' in data:
+        XML.SubElement(hipchat, 'matrixTriggerMode').text = str(data['matrix-mode'])
+    else:
+        XML.SubElement(hipchat, 'matrixTriggerMode').text = 'ONLY_PARENT'
 
     # optional settings, so only add XML in if set.
     if 'start-message' in data:
